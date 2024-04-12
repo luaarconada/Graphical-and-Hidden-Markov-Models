@@ -1,0 +1,176 @@
+---
+title: "Exercises 0"
+author: "Lúa Arconada Manteca"
+date: "2024-04-09"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## EXERCISE 1. Suppose that the joint distribution of a discrete variable, X and two continuous variables Y and Z is
+
+$$
+f(x,y,z) \propto \frac{z^{\alpha + x}}{x!}e^{-(\beta + y + 1)z}.
+$$
+
+### a) Are X and Y conditionally independent given Z? Why?
+
+We are going to use the criterion we saw in class called 'The factorization theorem'. It says that $X \perp \!\!\! \perp Y |  Z$ if and only if:
+
+$$
+f(x,y,z) = g(x,z)h(y,z),
+$$
+where $g(\cdot)$ and $h(\cdot)$ are not probabilities, but non-negative functions.
+
+Hence, what we need to do, is to factorize the given density function $f(x,y,z)$ as the product of two densities depending on X and Z one and the other on Y and Z.
+
+$$
+f(x,y,z) \propto \frac{z^{\alpha + x}}{x!}e^{-(\beta + y + 1)z}.
+$$
+
+We can see that we do not have to make any operation since we have the factorization we want. We define:
+
+$$
+g(x,z) \propto \frac{z^{\alpha + x}}{x!}
+$$
+
+and
+
+$$
+h(y,z) \propto e^{-(\beta + y + 1)z}.
+$$
+
+The last thing we have to check to be able to use the theorem and conclude that they are conditionally independent is if g and h are non-negative functions. 
+
+Since we said in class that our variables X, Y and Z are non-negative, we have this checked, because $g(x,z)$ is non-negative as a result and so is $h(y,z)$. Hence, X and Y ARE conditionally independent given Z.
+
+### b) Are X and Y independent? Why?
+
+We are going to obtain the joint distribution of X and Y $f_{X,Y}(x,y)$ to see if we can factorize it as the product of the marginals $f_{X,Y}(x,y) = f_X(x)f_Y(y)$, which would indicate independence if it can be done.
+
+We obtain the joint distribution with the following integral:
+
+$$
+f_{X,Y}(x,y) = \int_0^{\infty} f(x,y,z) dz    \propto  \int_{0}^{\infty}\frac{z^{\alpha +x}}{x!} e^{-(\beta+y+1)z}dz=\frac{1}{x!}\int_{0}^{\infty}z^{\alpha +x} e^{-(\beta+y+1)z}dz.
+$$
+
+To simplify the integral, we make a change of variable setting the new variable as the exponent of the exponential without the minus.
+
+$$
+t=(\beta+y+1)z \Rightarrow dt=(\beta+y+1)dz.
+$$
+
+Also, we obtain that:
+
+$$
+z = \frac{t}{\beta + y + 1}.
+$$
+
+Now, we rewrite our integral (without the constant outside of it) with this new variable as follows:
+
+$$
+\int_{0}^{\infty}z^{\alpha +x} e^{-(\beta+y+1)z}dz=\int_{0}^{\infty}\frac{t^{\alpha +x}}{(\beta+y+1)^{\alpha+x}} e^{-t}\frac{1}{\beta+y+1}dt=\frac{1}{(\beta+y+1)^{\alpha+x+1}}\int_{0}^{\infty}t^{\alpha +x}e^{-t}dt.
+$$
+
+We can see that it is pretty similar to the gamma function, which is as follows:
+
+$$
+\Gamma(z)=\int_{0}^{\infty}t^{z-1}e^{-t}dt.
+$$
+
+So, we are going to take advantage of this and use it to compute our desired integral, which is solved this way:
+
+$$
+\int_{0}^{\infty}z^{\alpha +x} e^{-(\beta+y+1)z}dz=\frac{1}{(\beta+y+1)^{\alpha+x+1}}\int_{0}^{\infty}t^{\alpha +x}e^{-t}dt= \frac{1}{(\beta+y+1)^{\alpha+x+1}}\int_{0}^{\infty}t^{\alpha +x +1 -1}e^{-t}dt= \frac{\Gamma(\alpha+x+1)}{(\beta+y+1)^{\alpha+x+1}}.
+$$
+
+To sum all this up, our joint distribution is:
+
+$$
+f_{X,Y}(x,y)\propto\frac{\Gamma(\alpha+x+1)}{x!(\beta+y+1)^{\alpha+x+1}},
+$$
+
+where we can easily see that it cannot be factorized as our wanted product of the marginal distributions $f_X(x)$ and $f_Y(y)$.
+
+Hence, X and Y ARE NOT independent variables.
+
+### c) Draw an undirected graph to represent the dependence structure of X, Y and Z.
+
+Thanks to parts a) and b), we know that we have to represent the following conditions:
+
+$$
+X \perp \!\!\! \perp Y\mid Z\\
+X  \not \perp\!\!\!\perp Y
+$$
+
+Hence, our corresponding graph is:
+
+```{r 1c}
+ug1 <- igraph::graph(c("X","Z", "Y","Z"), directed = FALSE)
+plot(ug1)
+```
+
+### d) Draw a directed graph to represent the dependence structure of X, Y and Z.
+
+The dependence structure of $X$, $Y$ and $Z$ corresponds to a common parent structure or fork. Hence, our directed acyclic graph (DAG) is the following:
+
+```{r 1d}
+dag1 <- gRbase::dag(~ Z*X+Z*Y)
+plot(dag1)
+```
+
+## EXERCISE 2. Consider the following undirected graph.
+
+```{r 2}
+ug1 <- gRbase::ug(c("A","C","D","E"), c("A","B"), c("E","F")) 
+ug1 <- gRbase::removeEdge("D", "C", ug1)
+ug1 <- gRbase::removeEdge("A", "E", ug1)
+ug1 <- gRbase::removeEdge("F", "E", ug1)
+plot(ug1)
+```
+
+### a) What are the maximal cliques in this graph?
+
+```{r}
+iug1 <- as(ug1, "igraph")
+igraph::max_cliques(iug1)
+```
+
+The maximal cliques are {F}, {B,A}, {A,D}, {A,C}, {C,E} and {D,E}. This is because these are the complete sub graphs to which no node can be added to create a bigger clique.
+
+### b) What is the dependence structure represented by this graph?
+
+To begin with, we can see clearly that B and A are directly dependent, as well as, A and C, C and E, E and D and D and A because they are connected by edges. Moreover, we can see that F is not dependent on any of the other variables. F is completely independent. Furthermore, we can see indirect dependencies between nodes that are connected but not directly by an edge, for example, A and E are indirectly connected.
+
+In addition, we can see than B and D are conditionally independent given A, because all the possible paths between them (B-A-D) go through A. The same with B-C and B-E. The rest of the pairs of variables are not conditionally independent given any other variable because there are always alternative paths.
+
+## EXERCISE 3. Consider the following directed graph.
+
+```{r}
+dag1 <- gRbase::dag(~ F+ E:F+ D:E + B+ A:B+ D:A+ C + A:C)
+plot(dag1)
+```
+
+### a) Are nodes A and F independent? Why?
+
+We check with R.
+
+```{r}
+bndag1 <- bnlearn::as.bn(dag1)
+bnlearn::dsep(bndag1, "A", "F", character(0))
+```
+
+We have obtained that A and F ARE in fact independent, because they are d-separated using an empty set as the conditioning set. Moreover, we can see this because there is no direct path between those two nodes.
+
+### b) Are nodes A and F independent given D? Why?
+
+We check with R.
+
+```{r}
+bnlearn::dsep(bndag1, "A", "F", c("D"))
+```
+
+A and F are not conditionally independent because they are not d-separated.
