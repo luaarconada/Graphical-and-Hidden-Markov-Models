@@ -43,11 +43,14 @@ X$p.value # is the p-value
 # Calculation of the deviance.
 #
 dmod(~Major:Gender,data=freq)  #The saturated model
-dmod(~Major+Gender,data=freq)  #The independent model
+dmod(~Major+Gender,data=freq)  #The independent model (the plus makes it so we are treating both things as independent)
+pchisq(2.38, df = 2, lower.tail = FALSE) # 0.3042213, pretty similar to the x$p.value 0.3120586 computed
+# deviance = 2.38, pretty similar to the x$statistic 2.329129 computed
 #
 # Fit the Poisson regression model.
 #
 glm(Freq~Major+Gender,family=poisson,data=as.data.frame(freq))
+# The residual deviance is our x$statistics from before or the deviance from dmod
 #
 # 3 way table example.
 #
@@ -74,6 +77,8 @@ m2 <- dmod(~alcohol*tobacco+tobacco*marijuana+marijuana*alcohol,data=drug_use) #
 plot(m2)
 m3 <- dmod(~alcohol*tobacco*marijuana,data=drug_use) #Full model
 plot(m3)
+# We have the same graph but a different model, in the second one we have the term XYZ, while in the first we had
+# the 3 pairs
 #
 # Perform maximum likelihood estimation for the 2 way interactions model.
 #

@@ -34,6 +34,7 @@ iug1 <- igraph::graph(c("A","B", "A","C", "B","C", "C","D"), directed = FALSE)
 plot(iug1)
 #
 # igraph also allows us to plot "illegal" graphs.
+# illegal because we have a loop and a double edge.
 #
 illegal.graph <- igraph::graph(c("A","A", "A","C", "B","C", "C","D", "C","D"), 
                    directed = FALSE)
@@ -100,7 +101,8 @@ gRbase::separates("A","C", c("B","D"), ug1)
 #
 # Creating a directed acyclic graph.
 #
-dag1 <- gRbase::dag(~ A+B*A+C*B+D*B+E*C*D+F*E)
+dag1 <- gRbase::dag(~ A+B*A+C*B+D*B+E*C*D+F*E) 
+# * indicates 'depends on'
 dag1
 plot(dag1)
 #
