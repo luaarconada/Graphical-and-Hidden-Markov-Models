@@ -47,6 +47,7 @@ dmod(~Major+Gender,data=freq)  #The independent model (the plus makes it so we a
 pchisq(2.38, df = 2, lower.tail = FALSE) # 0.3042213, pretty similar to the x$p.value 0.3120586 computed
 # deviance = 2.38, pretty similar to the x$statistic 2.329129 computed
 #
+
 # Fit the Poisson regression model.
 #
 glm(Freq~Major+Gender,family=poisson,data=as.data.frame(freq))
@@ -183,9 +184,9 @@ pchisq(mfaic$fitinfo$dev,mfaic$fitinfo$dimension[4])
 pchisq(mbbic$fitinfo$dev,mbbic$fitinfo$dimension[4])
 pchisq(mfbic$fitinfo$dev,mfbic$fitinfo$dimension[4]) 
 pchisq(mbaic_unrestricted$fitinfo$dev,mbaic$fitinfo$dimension[4])
-pchisq(mfaic_unrestricted$fitinfo$dev,mfaic$fitinfo$dimension[4])
-pchisq(mbbic_unrestricted$fitinfo$dev,mbbic$fitinfo$dimension[4])
-pchisq(mfbic_unrestricted$fitinfo$dev,mfbic$fitinfo$dimension[4])
+pchisq(mfaic_unrestricted$fitinfo$dev,mfaic_unrestricted$fitinfo$dimension[4])
+pchisq(mbbic_unrestricted$fitinfo$dev,mbbic_unrestricted$fitinfo$dimension[4])
+pchisq(mfbic_unrestricted$fitinfo$dev,mfbic_unrestricted$fitinfo$dimension[4])
 #
 # Which of all the models should be selected according to aic?
 #
