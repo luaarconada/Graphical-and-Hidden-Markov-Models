@@ -1,0 +1,953 @@
+---
+title: "Assignment 1"
+author: "Lúa Arconada Manteca"
+date: "28-04-2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load the dataset
+
+First of all, before beginning with the analysis, we load the needed libraries for it.
+
+```{r libraries, eval=FALSE, warning=FALSE, results = FALSE}
+# Check if the BiocManager package is available, if not, install it
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+# Install required Bioconductor packages
+BiocManager::install("graph")
+BiocManager::install("Rgraphviz")
+
+# Install gRim package, which also installs gRbase
+# gRbase is required for the dataset used in the analysis
+if (!require("gRim"))
+  install.packages("gRim")
+```
+
+```{r libraries2, warning = FALSE, results = FALSE}
+# Load necessary libraries for the analysis
+library(graph)     # For working with graphs
+library(gRim)      # For fitting graphical log-linear models
+library(gRbase)    # For the dataset used in the analysis
+library(dplyr)     # For data manipulation
+library(ggplot2)   # For data visualization
+```
+
+Moreover, we set a seed for reproducibility and load our dataset from the `gRbase` library in R. Furthermore, we eliminate some variables because we had too many to be able to carry out a good analysis.
+
+```{r data}
+# Set the seed for reproducibility
+set.seed(1212)
+
+# Load the BodyFat dataset
+data(BodyFat)
+
+# Create a copy of the dataset
+data <- BodyFat
+
+# Remove the original dataset from the environment
+rm(BodyFat)
+
+# Eliminate variables from the dataset
+data <- data[-c(1, 4, 5, 6, 9, 11, 12, 14, 15)] # We eliminate variables because there are too many for our number of observations.
+```
+
+## 1) Write a brief introduction to the data (where it comes from, what are the variables, etc.)
+
+The objective of this assignment is to conduct exploratory data analysis and statistical modeling on a dataset containing body measurements and body fat percentage for 252 men. This involves:
+
+1. Summarizing the dataset's main statistics and visualizing variable distributions to gain insights into the data's characteristics.
+2. Computing contingency tables to examine relationships between different body measurements.
+3. Fitting graphical log-linear models to the data using the `gRim` library, considering various combinations of  variables.
+4. Selecting the most suitable models based on criteria such as the Akaike Information Criterion (AIC) and Bayesian Information Criterion (BIC), using backward and forward selection methods.
+5. Analyzing the selected models to reveal dependencies and interactions among variables, providing insights into the physiological relationships between different body measurements and body fat percentage estimation.
+
+Overall, the assignment aims to deepen our understanding of the dataset's structure and underlying dependencies.
+
+```{r names}
+# Display the names of variables in the dataset
+names(data)
+```
+
+Our variables are the following:
+
+- `BodyFat`: percent of body fat from Siri’s (1956) equation, a numeric vector.
+- `Age`: age in years, a numeric vector.
+- `Chest`: circumference of the chest in cm, a numeric vector.
+- `Abdomen`: circumference of the abdomen in cm, a numeric vector.
+- `Thigh`: circumference of the thigh in cm, a numeric vector.
+- `Biceps`: circumference of the bicep in cm, a numeric vector.
+
+Our dataset consists of these 6 variables and 252 observations all from men. We take a look at the values of the first observations.
+
+```{r headdata}
+# Display the first few rows of the dataset
+head(data)
+```
+
+We take a quick look at the main statistics of our variables.
+
+```{r summary}
+# Summarize the dataset
+summary(data)
+```
+
+We can take a visual look at the distribution of each of the variables to get an idea of their ranges. We do this to help us in choosing an adequate threshold later when we categorize our variables.
+
+```{r histnum}
+# Get the names of variables in the dataset
+vars = names(data)
+
+# Iterate over each variable
+for(var in vars) {
+  # Plot histogram for the current variable
+  hist(data[[var]], 
+       main = paste("Histogram of", var),    # Title of the plot
+       xlab = var,                           # Label for x-axis
+       ylab = "Frequency",                   # Label for y-axis
+       col = "skyblue",                      # Fill color of bars
+       border = "black"                      # Border color of bars
+  )
+}
+```
+
+It would be interesting to have some contingency tables of each pair of variables. However, to do this and for the rest of the assignment, we need our variables to be binary and they are numerical. To solve this issue, we are going to categorize our variables. Then, we are going to compute the contingency tables iterating over every pair of variables.
+
+The following code begins by defining `breaks_list`, which contains the breaks for categorizing each numerical variable into two groups: Low and High. Additionally, `labels_list` specifies these labels for these groups. Then, a list `contingency_tables` is initialized to store the computed contingency tables.
+
+The main computation occurs within nested loops. The outer loop iterates over each variable in `breaks_list`, and the inner loop iterates over the same set of variables. For each pair of variables (excluding comparisons of a variable with itself), the code:
+
+- Creates categorized versions of the two variables using the `cut()` function.
+- Computes a contingency table comparing the categorized versions of the two variables.
+- Adds margins to the contingency table using `addmargins()` for better interpretation.
+- Stores the resulting contingency table in the `contingency_tables` list with a title indicating the variables involved in the comparison.
+
+And, finally, it prints the contingency tables computed.
+
+```{r conttable}
+# Define breaks and labels for categorizing each numerical variable
+breaks_list <- list(
+  BodyFat = c(-Inf, 25, Inf),   # Breaks for BodyFat variable
+  Age = c(-Inf, 40, Inf),        # Breaks for Age variable
+  Chest = c(-Inf, 95, Inf),      # Breaks for Chest variable
+  Abdomen = c(-Inf, 85, Inf),    # Breaks for Abdomen variable
+  Thigh = c(-Inf, 55, Inf),      # Breaks for Thigh variable
+  Biceps = c(-Inf, 32.5, Inf)    # Breaks for Biceps variable
+)
+
+# Define labels for the categorized groups
+labels_list <- list(
+  Low = "Low",   # Label for low group
+  High = "High"  # Label for high group
+)
+
+# Initialize a list to store contingency tables
+contingency_tables <- list()
+
+# Compute contingency tables for each pair of variables
+for (i in 1:length(breaks_list)) {
+  for (j in 1:length(breaks_list)) {
+    # Exclude comparisons of a variable with itself
+    if (i != j) {
+      # Get variable names for the pair
+      var1 <- names(breaks_list)[i]
+      var2 <- names(breaks_list)[j]
+      
+      # Create categorized versions of the variables
+      data[[paste0(var1, "Group")]] <- cut(data[[var1]], breaks = breaks_list[[var1]], labels = labels_list)
+      data[[paste0(var2, "Group")]] <- cut(data[[var2]], breaks = breaks_list[[var2]], labels = labels_list)
+      
+      # Compute contingency table for the pair
+      table <- table(data[[paste0(var1, "Group")]], data[[paste0(var2, "Group")]])
+      
+      # Add margins to the contingency table for better interpretation
+      contingency_tables[[paste(var1, "vs", var2)]] <- addmargins(table)
+    }
+  }
+}
+
+# Print the contingency tables
+contingency_tables
+```
+
+The contingency tables reveal interesting relationships between various body measurements and body fat percentage. For instance, when comparing body fat percentage with age, there's a noticeable trend where older individuals tend to have higher body fat percentages. Similarly, measurements like chest circumference and abdomen circumference show a positive correlation with body fat percentage, indicating that individuals with larger chest or abdomen measurements tend to have higher body fat percentages. This trend extends to thigh measurements as well, suggesting that individuals with larger thigh circumferences may also exhibit higher body fat percentages.
+
+Conversely, the relationship between body fat percentage and biceps measurements appears to be inverse; individuals with larger biceps measurements tend to have lower body fat percentages. This observation implies a potential protective effect of muscle mass against body fat accumulation.
+
+Moreover, the relationships between these measurements are not unidirectional. For example, while body fat percentage is influenced by age, chest circumference, abdomen circumference, thigh circumference, and biceps measurements, these measurements are also influenced by body fat percentage. This bidirectional interaction underscores the complexity of physiological relationships and highlights the interconnected nature of bodily metrics.
+
+Overall, these findings underscore the importance of considering multiple body measurements when assessing body fat percentage, as they collectively contribute to a comprehensive understanding of body composition. Further analysis could explore these relationships in more detail to elucidate underlying physiological mechanisms and inform strategies for health assessment and fitness evaluation.
+
+Now, after categorizing our variables, we have doubled the number of variables in our dataset `data`. We have the 6 original ones (numeric) and the 6 binary ones. However, the second group of variables has the same names as the originals but adding the word Group. For example, the variable `Thigh`, when categorized, is named `ThighGroup` and the same for the other variables. We take a look at these binary variables and the number of observations they have in each category.
+
+```{r summarybinary}
+# Summary of the binary variables in the dataset (columns 7 to 12)
+summary(data[7:12])
+```
+
+We now compute histograms for all our binary variables to see this in a visual way.
+
+```{r histbin}
+# Select binary variables from your dataset
+binary_vars <- c("BodyFatGroup", "AgeGroup", "ChestGroup", "AbdomenGroup", 
+                 "ThighGroup", "BicepsGroup")
+
+# Initialize an empty list to store plots
+plot_list <- list()
+
+# Create a histogram for each binary variable
+for (var in binary_vars) {
+  # Subset data for the current variable
+  var_data <- data.frame(table(data[[var]]))
+  
+  # Plot histogram
+  p <- ggplot(var_data, aes(x = Var1, y = Freq, fill = Var1)) +  # Define plot aesthetics
+    geom_bar(stat = "identity", color = "black") +  # Create bar plot with frequency as y-axis and a black border
+    labs(title = paste("Histogram of", var),  # Set plot title
+         x = var, y = "Frequency",  # Set x and y axis labels
+         fill = "Category") +  # Set legend title
+    theme_minimal() +  # Apply a minimalistic theme
+    scale_fill_manual(values = c("salmon", "skyblue"))  # Set custom fill colors
+  
+  # Store the plot in the list
+  plot_list[[var]] <- p
+}
+
+# Plot all histograms
+for (plot in plot_list) {
+  print(plot)  # Print each histogram plot
+}
+```
+
+## 2) Try to fit different types of graphical log linear models to the data and select the most appropriate model.  Draw the graphs of the models you fit and comment on whether the independencies in the data make sense. 
+
+We are going to fit some examples of models using the `dmod` function choosing some combinations of variables and interactions.
+
+```{r xtabs}
+# Create a contingency table using the xtabs function
+# This table represents the cross-tabulation of the selected variables
+# The formula ~. specifies that we want to cross-tabulate all variables against each other
+# We use data[7:12] to select only the binary variables from our dataset
+datatable <- xtabs(~ ., data = data[7:12])
+```
+
+```{r modelsbyhand, warning = FALSE}
+# Define the models
+# Model 1
+model1 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup * ThighGroup + AbdomenGroup * BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 2
+model2 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup * ThighGroup + AbdomenGroup * BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 3
+model3 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup * BicepsGroup + AbdomenGroup * ThighGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 4
+model4 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup * BicepsGroup + AbdomenGroup * ThighGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 5
+model5 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup * ThighGroup + BicepsGroup * AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 6
+model6 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup * ThighGroup + BicepsGroup * AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 7
+model7 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup * BicepsGroup + ThighGroup * AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 8
+model8 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup * BicepsGroup + ThighGroup * AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 9
+model9 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup * ThighGroup + AbdomenGroup + BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 10
+model10 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup * ThighGroup + AbdomenGroup + BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 11
+model11 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup * BicepsGroup + ThighGroup + AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 12
+model12 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup * BicepsGroup + ThighGroup + AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 13
+model13 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup + ThighGroup * AbdomenGroup + BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 14
+model14 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup + ThighGroup * AbdomenGroup + BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 15
+model15 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup + ThighGroup * BicepsGroup + AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 16
+model16 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup + ThighGroup * BicepsGroup + AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 17
+model17 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup + AbdomenGroup * ThighGroup + BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 18
+model18 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup + AbdomenGroup * ThighGroup + BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 19
+model19 <- dmod(~ AgeGroup * BodyFatGroup + ChestGroup + BicepsGroup * ThighGroup + AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 20
+model20 <- dmod(~ AgeGroup * ChestGroup + BodyFatGroup + BicepsGroup * ThighGroup + AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 21
+model21 <- dmod(~ AgeGroup * BodyFatGroup + ThighGroup + ChestGroup * AbdomenGroup + BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 22
+model22 <- dmod(~ AgeGroup * ChestGroup + ThighGroup + BodyFatGroup * AbdomenGroup + BicepsGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 23
+model23 <- dmod(~ AgeGroup * BodyFatGroup + BicepsGroup + ChestGroup * ThighGroup + AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+
+# Model 24
+model24 <- dmod(~ AgeGroup * ChestGroup + BicepsGroup + BodyFatGroup * ThighGroup + AbdomenGroup + BicepsGroup * ChestGroup + ThighGroup * AbdomenGroup * ChestGroup + BodyFatGroup * AbdomenGroup * ChestGroup, data = datatable)
+```
+
+We view the fitted models.
+
+```{r viewmodels}
+# View models
+model1  # Display Model 1
+model2  # Display Model 2
+model3  # Display Model 3
+model4  # Display Model 4
+model5  # Display Model 5
+model6  # Display Model 6
+model7  # Display Model 7
+model8  # Display Model 8
+model9  # Display Model 9
+model10  # Display Model 10
+model11  # Display Model 11
+model12  # Display Model 12
+model13  # Display Model 13
+model14  # Display Model 14
+model15  # Display Model 15
+model16  # Display Model 16
+model17  # Display Model 17
+model18  # Display Model 18
+model19  # Display Model 19
+model20  # Display Model 20
+model21  # Display Model 21
+model22  # Display Model 22
+model23  # Display Model 23
+model24  # Display Model 24
+```
+
+We now want to store the AIC and BIC values of these models in a dataframe. We want this because we are going to fit even more models and then we are going to choose the best ones according to their AIC and BIC values, so we want to store them for easier access later on.
+
+```{r aicbicbyhand}
+# List to store AIC and BIC values
+aic_bic_values <- list()
+
+# Define the models
+models <- list(
+  model1,
+  model2,
+  model3,
+  model4,
+  model5,
+  model6,
+  model7,
+  model8,
+  model9,
+  model10,
+  model11,
+  model12,
+  model13,
+  model14,
+  model15,
+  model16,
+  model17,
+  model18,
+  model19,
+  model20,
+  model21,
+  model22,
+  model23,
+  model24
+)
+
+# Calculate AIC and BIC for each model
+for (i in seq_along(models)) {
+  model <- models[[i]]  # Get the current model
+  aic <- model$fitinfo$aic  # Calculate AIC
+  bic <- model$fitinfo$bic  # Calculate BIC
+  aic_bic_values[[i]] <- c(AIC = aic, BIC = bic)  # Store AIC and BIC values
+}
+
+# Combine AIC and BIC values into a data frame
+aic_bic_df <- do.call(rbind, aic_bic_values)
+
+# Add model names as row names
+rownames(aic_bic_df) <- paste0("Model", 1:length(models))
+
+# Print the AIC and BIC values
+aic_bic_df  # Display the AIC and BIC values
+```
+
+Now we are going to look for the best model in terms of the AIC value using backwards and forwards selection. We start with backwards selection. 
+
+Backward selection is a method used to refine models by systematically removing non-essential predictors. At its core, this approach aims to simplify complex models by iteratively eliminating predictors that do not contribute significantly to explaining the variation in the response variable.
+
+Initially, backward selection starts with a full model that encompasses all available predictors in the dataset. This full model serves as the starting point for the selection process, providing a comprehensive view of the relationship between the predictors and the response variable.
+
+The iterative process of backward selection involves evaluating the significance of each predictor and systematically removing the least significant one at each step. This evaluation is typically based on various statistical measures, such as Akaike Information Criterion (AIC) (the one we are using), Bayesian Information Criterion (BIC), or p-values of coefficients.
+
+The choice of evaluation criterion plays a crucial role in guiding the selection process, as it helps quantify the trade-off between model complexity and goodness of fit. By assessing the impact of predictor removal on the chosen criterion, the method determines which predictors are essential for adequately explaining the variability in the response variable.
+
+The backward selection process continues iteratively until a predetermined stopping criterion is met. Common stopping criteria include reaching a specified number of predictors or when further removals do not lead to substantial improvements in the model's fit.
+
+Ultimately, the goal of backward selection is to identify a parsimonious model that strikes a balance between simplicity and predictive accuracy. The final model comprises only the predictors that are deemed statistically significant, providing a streamlined representation of the underlying relationship between the predictors and the response variable.
+
+```{r backwardaic}
+# Fit a full model
+msat <- dmod(~.^., data = datatable)
+
+# Perform backward selection
+modelbaic <- backward(msat)
+```
+
+We take a look at the resulting model.
+
+```{r formulabackwardsaic}
+# Extract the formula from the backward-selected model
+formula(modelbaic)
+
+# View the backward-selected model
+modelbaic
+```
+
+We append a row to our `aic_bic_df` dataframe containing the AIC and BIC values of this new model, along with its name.
+
+```{r backwardsaicaicbic}
+# Calculate AIC and BIC values for the backward-selected model
+aic_value <- modelbaic$fitinfo$aic
+bic_value <- modelbaic$fitinfo$bic
+
+# Create a dataframe with the AIC and BIC values
+new_row <- data.frame(AIC = aic_value, BIC = bic_value)
+
+# Assign rownames
+rownames(new_row) <- deparse(substitute(modelbaic))
+
+# Add the new row to aic_bic_df
+aic_bic_df <- rbind(aic_bic_df, new_row)
+```
+
+We now use forwards selection.
+
+Forward selection is another technique utilized in regression analysis to construct models by sequentially adding predictors. This method aims to identify the most relevant predictors that contribute significantly to explaining the variability in the response variable.
+
+At the outset, forward selection begins with an empty model that includes no predictors. This serves as the starting point for the selection process, offering a blank canvas to gradually build the model.
+
+The iterative process of forward selection involves evaluating the significance of each predictor and systematically adding the most significant one at each step. Similar to backward selection, the evaluation is typically based on statistical measures such as AIC(8what we are now using), BIC, or p-values of coefficients. The forward selection process also continues iteratively until a predetermined stopping criterion is met.
+
+```{r forwardaic}
+# Define the initial model
+mmain <- dmod(~.^1, data = datatable)
+
+# Perform forward selection to find the best model
+modelfaic <- forward(mmain)
+```
+
+We take a look at the resulting model.
+
+```{r formulaforwardaic}
+# Extract the formula of the best model from forward selection
+formula(modelfaic)
+
+# Display the details of the best model
+modelfaic
+```
+
+We store its AIC and BIC values, as well as its name.
+
+```{r forwardaicaicbic}
+# Extract AIC and BIC values from the best model from forward selection
+aic_value <- modelfaic$fitinfo$aic
+bic_value <- modelfaic$fitinfo$bic
+
+# Create a dataframe with the AIC and BIC values
+new_row <- data.frame(AIC = aic_value, BIC = bic_value)
+
+# Assign rownames
+rownames(new_row) <- deparse(substitute(modelfaic))
+
+# Add the new row to aic_bic_df
+aic_bic_df <- rbind(aic_bic_df, new_row)
+```
+
+Now we are going to do the same, but with the BIC value as the optimized measure. We start with backwards selection again.
+
+```{r backwardbic}
+# Perform backward selection with a modification for the number of parameters
+mbbic <- backward(msat, k = log(sum(reinis)))
+```
+
+We take a look at this new model.
+
+```{r formulabackwardbic}
+# Get the formula of the model selected by backward elimination using BIC
+formula(mbbic)
+
+# View the model selected by backward elimination using BIC
+mbbic
+```
+
+We store its name and AIC and BIC values.
+
+```{r backwardbicaicbic}
+# Extract AIC and BIC values from the model selected by backward elimination using BIC
+aic_value <- mbbic$fitinfo$aic
+bic_value <- mbbic$fitinfo$bic
+
+# Create a dataframe with the AIC and BIC values
+new_row <- data.frame(AIC = aic_value, BIC = bic_value)
+
+# Assign rownames to the new row
+rownames(new_row) <- deparse(substitute(mbbic))
+
+# Add the new row to the existing dataframe containing AIC and BIC values
+aic_bic_df <- rbind(aic_bic_df, new_row)
+```
+
+We now perform forward selection.
+
+```{r forwardbic}
+# Perform forward selection using BIC with additional penalty term
+mfbic <- forward(mmain, k = log(sum(reinis)))
+```
+
+We take a look at this model.
+
+```{r formulaforwardbic}
+# View the formula of the selected model from forward selection with BIC
+formula(mfbic)
+# View the details of the selected model
+mfbic
+```
+
+We, once again, store the name of the new model along with is AIC and BIC values.
+
+```{r forwardbicaicbic}
+# Extract AIC and BIC values from the forward selected model
+aic_value <- mfbic$fitinfo$aic
+bic_value <- mfbic$fitinfo$bic
+
+# Create a dataframe with the AIC and BIC values
+new_row <- data.frame(AIC = aic_value, BIC = bic_value)
+
+# Assign rownames
+rownames(new_row) <- deparse(substitute(mfbic))
+
+# Add the new row to aic_bic_df
+aic_bic_df <- rbind(aic_bic_df, new_row)
+```
+
+We can also search for the optimal model without the restriction of decomposable models. The fitted decomposable (lhs) and unrestricted (rhs) models do not always have the same graphs. We are going to repeat the exact same process, but without this restriction.
+
+First, we are going to use the AIC as the reference measure and we are going to perform backwards and forwards selection. We start with backwards selection as always.
+
+```{r backwardaicun}
+# Perform backward selection with unrestricted model
+mbaic_unrestricted <- backward(msat, type = "unrestricted")
+```
+
+We take a look at this model's formula the selected variables and interactions retained after the backward selection process with the "unrestricted" type.
+
+```{r formulabackwardaicun}
+# Extract the formula from the mbaic_unrestricted model
+formula(mbaic_unrestricted)
+# View the mbaic_unrestricted model
+mbaic_unrestricted
+```
+
+We store its name, as well as its AIC and BIC values as always.
+
+```{r barckwardaicunaicbic}
+# Extract AIC and BIC values from the mbaic_unrestricted model
+aic_value <- mbaic_unrestricted$fitinfo$aic
+bic_value <- mbaic_unrestricted$fitinfo$bic
+
+# Create a dataframe with the AIC and BIC values
+new_row <- data.frame(AIC = aic_value, BIC = bic_value)
+
+# Assign rownames to the new row based on the model name
+rownames(new_row) <- deparse(substitute(mbaic_unrestricted))
+
+# Add the new row to the existing dataframe aic_bic_df
+aic_bic_df <- rbind(aic_bic_df, new_row)
+```
+
+We now perform forwards selection.
+
+```{r forwardaicun}
+# Fit a forward selection model with unrestricted type
+mfaic_unrestricted <- forward(mmain, type = "unrestricted")
+```
+
+We take a look at the resulting model and its formula.
+
+```{r formulaforwardaicun}
+# Print the formula of the mfaic_unrestricted model
+formula(mfaic_unrestricted)
+
+# View the mfaic_unrestricted model
+mfaic_unrestricted
+```
+
+We store its AIC and BIC values, as well as its name.
+
+```{r forwardaicunaicbic}
+# Extract AIC and BIC values from the mfaic_unrestricted model
+aic_value <- mfaic_unrestricted$fitinfo$aic
+bic_value <- mfaic_unrestricted$fitinfo$bic
+
+# Create a dataframe with the AIC and BIC values
+new_row <- data.frame(AIC = aic_value, BIC = bic_value)
+
+# Assign rownames
+rownames(new_row) <- deparse(substitute(mfaic_unrestricted))
+
+# Add the new row to aic_bic_df
+aic_bic_df <- rbind(aic_bic_df, new_row)
+```
+
+We repeat this process, but now using the BIC value.
+
+```{r backwardbicun}
+# Fit a backward selection model with unrestricted type and custom penalty
+mbbic_unrestricted <- backward(msat, type = "unrestricted", k = log(sum(reinis)))
+```
+
+We take a look at this new model.
+
+```{r formulabackwardbicun}
+# Get the formula of the backward selection model with unrestricted type and custom penalty
+formula(mbbic_unrestricted)
+
+# View the mbbic_unrestricted model
+mbbic_unrestricted
+```
+
+We store its name, AIC value and BIC value.
+
+```{r backwardbicunaicbic}
+# Extract AIC and BIC values from the mbbic_unrestricted model
+aic_value <- mbbic_unrestricted$fitinfo$aic
+bic_value <- mbbic_unrestricted$fitinfo$bic
+
+# Create a data frame to store the AIC and BIC values
+new_row <- data.frame(AIC = aic_value, BIC = bic_value)
+
+# Assign row names to the data frame
+rownames(new_row) <- deparse(substitute(mbbic_unrestricted))
+
+# Add the new row to the existing AIC and BIC data frame
+aic_bic_df <- rbind(aic_bic_df, new_row)
+```
+
+And finally, we perform forwards selection.
+
+```{r forwardbicin}
+# Fit a forward selection model with unrestricted type and specified penalty
+mfbic_unrestricted <- forward(mmain, type = "unrestricted", k = log(sum(reinis)))
+```
+
+We take a look at this model.
+
+```{r formulaforwardbicin}
+# Get the formula used for the model stored in 'mfbic_unrestricted'
+formula(mfbic_unrestricted)
+
+# Display the model stored in 'mfbic_unrestricted'
+mfbic_unrestricted
+```
+
+For the last time, we store the model's name along with is AIC and BIC values.
+
+```{r forwardbicunaicbic}
+# Extract the AIC and BIC values from the model's fit information
+aic_value <- mfbic_unrestricted$fitinfo$aic
+bic_value <- mfbic_unrestricted$fitinfo$bic
+
+# Create a new dataframe to store the AIC and BIC values
+new_row <- data.frame(AIC = aic_value, BIC = bic_value)
+
+# Assign row names to the dataframe based on the name of the model 'mfbic_unrestricted'
+rownames(new_row) <- deparse(substitute(mfbic_unrestricted))
+
+# Add the new row containing AIC and BIC values to the existing dataframe 'aic_bic_df'
+aic_bic_df <- rbind(aic_bic_df, new_row)
+```
+
+We have computed the following models, with these AIC and BIC values.
+
+```{r aicandbic}
+# Display the dataframe containing AIC and BIC values
+aic_bic_df
+```
+
+Now we are interested in drawing the graphs of the fitted models.
+
+```{r modelplots}
+# List of models
+model_list <- list(
+  model1, model2, model3, model4, model5, model6, model7, model8, model9, model10,
+  model11, model12, model13, model14, model15, model16, model17, model18, model19,
+  model20, model21, model22, model23, model24, modelbaic, modelfaic, mbbic, mfbic,
+  mbaic_unrestricted, mfaic_unrestricted, mbbic_unrestricted, mfbic_unrestricted
+)
+
+# Iterate over each model in the list and plot them
+for (i in seq_along(model_list)) {
+  # Plot the current model
+  plot(model_list[[i]], main = model_names[i])
+}
+```
+
+Our objective is to find the best model and for that we are interested in the ones with the lowest AIC and BIC values. For that, we sort our models by their AIC and BIC values and obtain the best 4 from each. Then, we extract the ones that are present in both groups.
+
+```{r topsfour}
+# Sort the dataframe by AIC and BIC values separately
+sorted_aic <- aic_bic_df[order(aic_bic_df$AIC), ]  # Sort dataframe by AIC values
+sorted_bic <- aic_bic_df[order(aic_bic_df$BIC), ]  # Sort dataframe by BIC values
+
+# Select the top four rows for each criterion
+top_four_aic <- sorted_aic[1:4, ]  # Select top four models based on AIC
+top_four_bic <- sorted_bic[1:4, ]  # Select top four models based on BIC
+
+# Print the top four models based on AIC and BIC
+top_four_aic
+top_four_bic
+```
+
+```{r best}
+# Find the intersection of row names
+common_models <- intersect(rownames(top_four_aic), rownames(top_four_bic))
+
+# Extract the common models from the original dataframe 'aic_bic_df'
+common_models_df <- aic_bic_df[common_models,]
+```
+
+We can see that the AIC and BIC values of the `mfaic_unrestricted`, `mfbic_unrestricted` and `mbbic_unrestricted` models are the same. This makes us suspect that maybe these resulting models are the same ones so we print their formulas and their plots to check it.
+
+```{r checkformulaseq}
+# Display the formula used in the model stored in 'mfaic_unrestricted'
+formula(mfaic_unrestricted)
+
+# Display the formula used in the model stored in 'mfbic_unrestricted'
+formula(mfbic_unrestricted)
+
+# Display the formula used in the model stored in 'mbbic_unrestricted'
+formula(mbbic_unrestricted)
+
+# Plot the model stored in 'mfaic_unrestricted'
+plot(mfaic_unrestricted)
+
+# Plot the model stored in 'mfbic_unrestricted'
+plot(mfbic_unrestricted)
+
+# Plot the model stored in 'mbbic_unrestricted'
+plot(mbbic_unrestricted)
+```
+
+We can see that the `mfaic_unrestricted` model and the `mfbic_unrestricted` one have the same formula. We can check it with R.
+
+```{r checkequalmodels}
+# Compare the plots of 'mfaic_unrestricted' and 'mfbic_unrestricted' models
+identical(plot(mfaic_unrestricted), plot(mfbic_unrestricted))
+```
+This code shows us the plots for both models. On top of that, it gives us `TRUE` as an output indicating that they are the same model infact.
+
+Moreover, even though the `mbbic_unrestricted` model does not have the same formula, it is the same because it has the same plot as we can see. 
+
+```{r checkequalmodels2}
+# Compare the plots of 'mfaic_unrestricted' and 'mbbic_unrestricted' models
+identical(plot(mfaic_unrestricted), plot(mbbic_unrestricted))
+```
+
+This code shows us, once again, that the two models are identical ones.
+
+Thus, we eliminate the two models that were compared with the `mfaic_unrestricted` model, namely, `mfbic_unrestricted` and `mbbic_unrestricted.` We have observed that the models obtained from backward and forward selection using BIC as the criterion, without the decomposable restriction, are identical to each other and to the one obtained through forward selection without the same restriction, but utilizing AIC instead.
+
+```{r eraseequalformulas}
+# Remove the row corresponding to 'mfbic_unrestricted' from 'aic_bic_df'
+aic_bic_df <- aic_bic_df[rownames(aic_bic_df) != "mfbic_unrestricted", ]
+
+# Remove the row corresponding to 'mbbic_unrestricted' from 'aic_bic_df'
+aic_bic_df <- aic_bic_df[rownames(aic_bic_df) != "mbbic_unrestricted", ]
+```
+
+Now that we have eliminated these models, we are going to sort again our dataframe containing the AIC and BIC values of our models and extracting the four top ones according to each criterion (the ones with the lowest values).
+
+```{r sortsecondtime}
+# Sort the dataframe by AIC and BIC values separately
+sorted_aic <- aic_bic_df[order(aic_bic_df$AIC), ]  # Sort dataframe by AIC values
+sorted_bic <- aic_bic_df[order(aic_bic_df$BIC), ]  # Sort dataframe by BIC values
+
+# Select the top four rows for each criterion
+top_four_aic <- sorted_aic[1:4, ]  # Select top four models based on AIC
+top_four_bic <- sorted_bic[1:4, ]  # Select top four models based on BIC
+
+# Print the top four models based on AIC and BIC
+top_four_aic
+top_four_bic
+```
+
+And again, we obtain the models that are in both of these computed groups. We extract the models that are among the 4 models with the lowest AIC and BIC values simultaneously, resulting in the following 3 models.
+
+```{r best2}
+# Find the intersection of row names between 'top_four_aic' and 'top_four_bic'
+common_models <- intersect(rownames(top_four_aic), rownames(top_four_bic))
+
+# Extract the rows corresponding to the common models from 'aic_bic_df'
+aic_bic_df[common_models,]
+```
+
+Now, we look at these models and their plots to observe their dependencies and independencies.
+
+First, we take a look at `mbaic_unrestricted` model, which is the model with lowest AIC and the second lowest BIC value.
+
+```{r bestmodel}
+# Display the formula used in the model stored in 'mbaic_unrestricted'
+formula(mbaic_unrestricted)
+
+# Plot the model stored in 'mbaic_unrestricted'
+plot(mbaic_unrestricted)
+```
+
+In this model, we can identify the dependencies and independencies as follows:
+
+- `AgeGroup`: It has interactions with `AbdomenGroup`, `ThighGroup` and `BodyFatGroup`.
+- `AbdomenGroup`: It interacts with `AgeGroup`, `ChestGroup`, `BodyFatGroup` and `ThighGroup`.
+- `ThighGroup`: It interacts with `AgeGroup`, `AbdomenGroup` and `BicepsGroup`.
+- `BodyFatGroup`: It interacts with `AgeGroup`, `AbdomenGroup` and `BicepsGroup`.
+- `ChestGroup`: It interacts with `BicepsGroup` and `AbdomenGroup`.
+- `BicepsGroup`: It interacts with `ChestGroup`, `BodyFatGroup`, and `ThighGroup`.
+
+Each group variable interacts with one or more other variables. This model suggests that the variables included have dependencies on each other and their relationships might affect the outcome being studied. While some independencies may exist, determining precise independencies solely based on the model formula is challenging due to the complex interactions and dependencies specified.
+
+This analysis unveils the intricate relationships among the variables within our model, shedding light on their interdependence based on the specified interactions. Notably, our findings reveal a comprehensive network of dependencies, suggesting a cohesive relationship between various bodily measurements. This outcome resonates with the inherent correlations often observed in datasets capturing diverse anatomical metrics.
+
+For instance, the observed mutual influence between changes in chest circumference and changes in abdomen circumference underscores a plausible cascade effect, where alterations in one anatomical region may propagate to others. This phenomenon aligns with common physiological expectations, where alterations in certain bodily parameters coincide with corresponding shifts in related measurements. 
+
+In essence, our analysis underscores the intricate web of connections inherent in the dataset, painting a vivid picture of how changes in one aspect of bodily composition may reverberate across multiple dimensions. This holistic perspective enhances our understanding of the complex interplay between physiological variables and offers valuable insights into broader patterns of bodily adaptation and composition.
+
+We are going to take a look at the other two models to see differences in their structures. 
+
+If we take a look at the `mfaic_unrestricted` model, which is the one with the second lowest AIC value and the lowest BIC one, we have the following plot.
+
+```{r secondbest}
+# Display the formula used in the model stored in 'mfaic_unrestricted'
+formula(mfaic_unrestricted)
+
+# Plot the model stored in 'mfaic_unrestricted'
+plot(mfaic_unrestricted)
+```
+
+We analyze the dependencies and independencies of this model:
+
+- `AbdomenGroup`: It interacts with `ChestGroup`, `ThighGroup`, and `BodyFatGroup`.
+- `ChestGroup`: It interacts with `AbdomenGroup` and `BicepsGroup`.
+- `ThighGroup`: It interacts with `AbdomenGroup` and `BicepsGroup`.
+- `BicepsGroup`: It interacts with `ChestGroup`, `ThighGroup`, and `BodyFatGroup`.
+- `AgeGroup`: It interacts with `BodyFatGroup`.
+- `BodyFatGroup`: It interacts with `AbdomenGroup`, `BicepsGroup`, and `AgeGroup`.
+
+This model shows interactions between different body measurement as well as interactions. These interactions imply that the variables included are interrelated and might collectively influence the outcome under investigation. While some independencies may exist, determining precise independencies solely based on the model formula is challenging due to the complex interactions and dependencies specified once again.
+
+The provided model exhibits a network of dependencies primarily driven by both direct effects and interaction terms. While it's challenging to pinpoint precise independencies without additional information, the model captures the intricate relationships among the variables, allowing for a comprehensive analysis of their interplay in predicting the outcome.
+
+Finally, if we take a look at the model with the third lowest AIC and BIC values, which is the `model15` model, we have the following plot:
+
+```{r thirdbest}
+# Display the formula used in the model stored in 'model15'
+formula(model15)
+
+# Plot the model stored in 'model15'
+plot(model15)
+```
+
+Based on the provided formula, we can infer the following dependencies and independencies:
+
+- `AbdomenGroup`: It interacts with `ThighGroup`, `ChestGroup` and `BodyFatGroup`.
+- `ThighGroup`: It interacts with `AbdomenGroup`, `ChestGroup` and `BicepsGroup`.
+- `BodyFatGroup`: It interacts with `AgeGroup`, `AbdomenGroup`, and `ChestGroup`.
+- `AgeGroup`: It interacts with `BodyFatGroup`.
+- `ChestGroup`: It interacts with `BicepsGroup`, `BodyFatGroup`, `ThighGroup` and `AbdomenGroup`.
+- `BicepsGroup`: It interacts with `ChestGroup` and `ThighGroup`.
+
+Similar to the previous models, this one also shows interactions between different body measurement groups and `AgeGroup`, implying their collective influence on the outcome variable. Once again, we can not determine precise independencies solely based on the model's formula.
+
+Let's compare the three models, highlighting their differences and similarities:
+
+*First Model:*
+- Contains interactions between `AgeGroup`, `AbdomenGroup`, `ThighGroup`, `ChestGroup`, `BicepsGroup`, and `BodyFatGroup`.
+- It includes interactions between almost all the variables, suggesting a complex relationship among them.
+
+*Second Model:*
+- Shares similarities with the first model but lacks interactions between `AgeGroup` and variables other than `BodyFatGroup`.
+- Still includes interactions between `AbdomenGroup`, `ThighGroup`, `ChestGroup`, `BicepsGroup`, and `BodyFatGroup`.
+
+*Third Model:*
+- Also shares similarities with the first model but lacks interactions between `AgeGroup` and other variables.
+- Similar to the second model, it includes interactions between `AbdomenGroup`, `ThighGroup`, `ChestGroup`, `BicepsGroup`, and `BodyFatGroup`.
+
+All three models exhibit shared interactions among key variables, including `AbdomenGroup`, `ThighGroup`, `ChestGroup`, `BicepsGroup`, and `BodyFatGroup`. These interactions suggest interdependencies within these body measurements, emphasizing their collective influence on the outcome variable. However, the extent and nature of these interactions vary across the models, delineating their respective complexities.
+
+Each model presents a complex network of dependencies, reflecting the intricate relationships among anatomical measurements. These interdependencies underscore the interconnected nature of physiological variables, highlighting how changes in one aspect may affect others. Determining precise independencies within each model proves challenging due to the intricate network of dependencies and interactions involved.
+
+Despite sharing commonalities, each model offers unique insights based on its specific formulation and inclusion of additional interactions or variables. The first model's extensive interactions, including `AgeGroup`, provide a nuanced understanding of how age interacts with other variables, potentially offering deeper insights into the factors influencing the outcome.
+
+Conversely, the second and third models offer simplified versions of the first, primarily by excluding interactions with `AgeGroup`. While they capture fundamental interactions between the body measurements and `BodyFatGroup`, they lack the added complexity introduced by considering age. This simplification may be advantageous in contexts where a straightforward model suffices or where `AgeGroup` is not deemed relevant.
+
+The progression from the second to the first model illustrates an escalation in the complexity of relationships captured. Each model serves a distinct purpose, with the choice between them depending on research objectives, desired level of detail, and specific hypotheses under investigation.
+
+In conclusion, the comparison highlights both commonalities and differences across the models, underscoring the richness and complexity of the relationships among anatomical measurements. Understanding these nuances is essential for making informed decisions in model selection, interpreting results accurately, and gaining deeper insights into underlying physiological processes.
+
+## 3) Carry out a goodness of fit test to see whether the selected model fits the data.
+
+We are going to choose the `mbaic_unrestricted` as our best model because taking into account both, the AIC and BIC values, it has the lowest one (AIC $= 1472.083$) of all. We have obtained this model using forwards selection maximizing the AIC value without the restriction of decomposable models. Now, we want to see if this model is actually a good model for our dataset and for that we carry out a goodness of fit test.
+
+```{r chisqtest}
+# Calculate the p-value using the chi-squared distribution for the given deviance and degrees of freedom
+pchisq(mbaic_unrestricted$fitinfo$dev, mbaic_unrestricted$fitinfo$dimension[4])
+```
+
+The p-value obtained from the chi-square test using the deviance statistic for the model `mbaic_unrestricted` is `r pchisq(mbaic_unrestricted$fitinfo$dev, mbaic_unrestricted$fitinfo$dimension[4])`. This indicates that there is not evidence against the null hypothesis, suggesting that the model fits the data well. Hence, the model `mbaic_unrestricted` is our best model and it is a good fit for our data too.
+
+The p-value, which is $0.1183729$ in this case, represents the probability of observing a test statistic as extreme as, or more extreme than, the one calculated from the sample data, assuming the null hypothesis (good model) is true. With a p-value of $0.1183729$, we fail to reject the null hypothesis at a typical significance level ($\alpha = 0.05, 0.02, 0.01$). This suggests that there isn't sufficient evidence in the data to conclude that the model significantly deviates from the null hypothesis.
+
+Hence, our best model is the `mbaic_unrestricted` model.
+
+```{r finalplot}
+# Assigning the model 'mbaic_unrestricted' as the best model
+bestmodel <- mbaic_unrestricted
+
+# Plot the best model
+plot(bestmodel)
+```
+
+## 4) Write some brief conclusions of your analysis.
+
+The dataset originates from the `gRbase` library in R and comprises various body measurements and the percentage of body fat for 252 men. It includes variables such as age, body fat percentage, and measurements of different body parts like chest, abdomen, thigh and biceps. These measurements serve as inputs for estimating body fat percentage using Siri’s equation.
+
+Exploratory data analysis involved summarizing the dataset's main statistics and visualizing variable distributions through histograms. We then computed contingency tables for pairs of variables, which needed categorizing numerical variables. These tables provide insights into the relationships between different body measurements.
+
+Graphical log-linear models were fitted to the data. Multiple models were generated by considering various combinations of predictor variables. Moreover, later model selection was based on the Akaike Information Criterion (AIC) and Bayesian Information Criterion (BIC). Backward and forward selection methods were employed to identify the most suitable models. Additionally, decomposable and unrestricted models were compared to assess the impact of model restrictions on graph structures.
+
+Furthermore, it's noteworthy to mention that during the model selection process using both AIC and BIC in unrestricted models, three models emerged as equally suitable according to these criteria. This convergence underscores the robustness of the selected models and provides additional confidence in the identified dependencies and relationships among the variables.
+
+The selected models revealed dependencies and independencies among variables. For instance, certain body measurements were found to depend on others, indicating potential physiological relationships. Interactions among variables further elucidated complex dependencies, highlighting the interconnected nature of bodily metrics.
+
+Analyzing the best-performing model, `mbaic_unrestricted`, revealed dependencies such as chest circumference depending on biceps and abdomen measurements. Similarly, the `mfaic_unrestricted` model showcased dependencies like thigh circumference depending on abdomen and biceps measurements. Moreover, the `model15` model showed other dependencies like biceps circumference depending on chest and thigh measurements. These findings provide valuable insights into the interplay between different body measurements and underscore the complex relationships inherent in physiological datasets.
+
+Overall, the analysis offers a comprehensive understanding of the dataset's structure and underlying dependencies, shedding light on the intricate relationships between various body measurements and body fat percentage estimation. Such insights are crucial for advancing research in areas like health assessment, fitness evaluation, and body composition analysis.
