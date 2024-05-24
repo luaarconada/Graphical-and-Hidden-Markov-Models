@@ -2,20 +2,34 @@
 # Bayesian HMMs
 #
 rm(list=ls())
-if (!require("MixtureInf"))
-  install.packages("MixtureInf")
-library(MixtureInf)
-data(earthquake)
-y <- earthquake$number
 #
-# Use MxtureInf to fit a classical mixture model.  Use the initial values of lambda for the Bayesian HMM.
+# Zucchini earthquake data showing the number of (magnitude 7) earthquakes every  
+# year from 1900 to 2006.
 #
-k <- 3
-out <- pmle.pois(earthquake,k,1)
-lambda <- out$"PMLE of component parameters:"
-lambda <- sort(lambda,decreasing=TRUE)
+y <- c(13, 14, 8, 10, 16, 26, 32, 27, 18, 32, 36, 24, 22, 23, 22, 18,
+       25, 21, 21, 14, 8, 11, 14, 23, 18, 17, 19, 20, 22, 19, 13, 26,
+       13, 14, 22, 24, 21, 22, 26, 21, 23, 24, 27, 41, 31, 27, 35, 26,
+       28, 36, 39, 21, 17, 22, 17, 19, 15, 34, 10, 15, 22, 18, 15, 20,
+       15, 22, 19, 16, 30, 27, 29, 23, 20, 16, 21, 21, 25, 16, 18, 15,
+       18, 14, 10, 15, 8, 15, 6, 11, 8, 7, 18, 16, 13, 12, 13, 20,
+       15, 16, 12, 18, 15, 16, 13, 15, 16, 11, 11)
+x <- c(1900:2006)
+earthquake <- data.frame(x = x, y = y)
+n <- length(y)
 #
-# Function of OpenBUGS code.
+# Fit a classical mixture model.  Use the initial values of lambda for the 
+# Bayesian HMM.
+#
+if (!require("depmixS4")){install.packages("depmixS4")}
+library(depmixS4)
+earthquake <- data.frame(x = x, y = y)
+temp <- mix(y ~ 1, nstates = 3, family = poisson(), data = earthquake)
+fit3 <- fit(temp)
+params <- getpars(fit3)
+p3 <- unname(params[1:3])
+lambda <- unname(exp(params[4:6]))
+#
+# Function for an HMM in OpenBUGS code.
 #
 bugsHMM <- function(){
   s[1] ~ dcat(P0[])
@@ -41,7 +55,8 @@ bugsHMM <- function(){
 # Define the data for the BUGS code
 #
 n <- length(y)
-data <- list("k"=k,"n"=n,"y"=y)
+k <- 3
+data <- list("k" = k, "n" = n, "y" = y)
 #
 # Define the initial values.
 #
@@ -49,7 +64,7 @@ lambda[1]
 lambda[2]/lambda[1]
 lambda[3]/lambda[2]
 inits <- function(){
-  list(lambda1=31.07,beta=c(0.5,0.64,0.66))
+  list(lambda1 = 31.07, beta = c(0.5, 0.64, 0.66))
 }
 #
 # Setting the parameters to be monitored

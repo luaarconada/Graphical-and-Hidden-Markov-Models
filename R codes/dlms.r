@@ -11,19 +11,20 @@ plot.ts(LakeHuron)
 # MODEL 0: Simple linear regression vs time
 #
 t <- c(1875:1972)
+n <- length(t)
 model0 <- lm(LakeHuron ~ t)
 f <- model0$fitted.values
-lines(t,f,lwd=2,col='red')
+lines(t, f, lwd = 2, col = 'red')
 r <- model0$residuals
-plot(t,r,col='red')
-lines(t,rep(0,length(t)))
-acf(r,lwd=2,col='red',main='ACF of residuals')
+plot(t, r, col = 'red')
+lines(t, rep(0,length(t)))
+acf(r, lwd = 2, col = 'red', main = 'ACF of residuals')
 # 
-# MODEL 1: Kalman filter with filter estimates of variances.
+# MODEL 1: Kalman filter with fixed variances.
 #
-mod1 <- dlmModPoly ( order=1 )
+mod1 <- dlmModPoly (order = 1, dV = 1, dW = 1)
 # Estimate the filtered values of the state vector 
-filt1 <- dlmFilter ( LakeHuron, mod1 )
+filt1 <- dlmFilter(LakeHuron, mod1)
 names(filt1)
 filt1$y
 filt1$mod
@@ -31,23 +32,40 @@ filt1$m
 #
 # Plot time series and fit.
 #
-plot ( LakeHuron, type="p", xlab="Year", ylab="Depth",
-       main="Lake Huron" )
-lines ( 1875:1972, filt1$m[-1] )
+plot (LakeHuron, type = "p", xlab = "Year", ylab = "Depth", main = "Lake Huron")
+lines ( 1875:1972, filt1$m[-length(filt1$m)] )
 #
 # Obtain confidence intervals 
 #
 var <- dlmSvd2var(filt1$U.C, filt1$D.C)
 sd <- sqrt(unlist(var))
-lines ( 1875:1972, filt1$m[-1] + 2*sd[-1], lty=3, col="red" )
-lines ( 1875:1972, filt1$m[-1] - 2*sd[-1], lty=3, col="red" )
+lines ( 1875:1972, filt1$m[-(n+1)] + 2*sd[-(n+1)], lty=3, col="red" )
+lines ( 1875:1972, filt1$m[-(n+1)] - 2*sd[-(n+1)], lty=3, col="red" )
 #
-# Estimate  predicted values of the state vectors
+# Estimate theta.
 #
 filt1$a
 dlmSvd2var ( filt1$U.R, filt1$D.R )
 points ( 1875:1972, filt1$a, lty=2, col="green" ) # forecast
 points ( 1875:1972, filt1$f, lty=2, col="magenta" ) # forecast
+#
+# Prediction
+#
+nAhead <- 10
+pred1 <- dlmForecast(filt1, nAhead = nAhead)
+means <- pred1$f
+sds <- NULL
+for (i in 1:nAhead){
+  sds <- c(sds, sqrt(pred1$Q[[i]]))
+}
+plot(1875:1972, as.vector(LakeHuron), xlab = "t", ylab = "Depth", 
+     xlim = c(1875,(1972+nAhead)), ylim = c(min(LakeHuron, means-1.96*sds), 
+                                            max(LakeHuron, means+1.96*sds)))
+lines(1973:(1972+nAhead), means[1:nAhead], col = "red")
+lines(1973:(1972+nAhead), means[1:nAhead]+1.96*sds[1:nAhead], lty = 2, 
+      col = "red")
+lines(1973:(1972+nAhead), means[1:nAhead]-1.96*sds[1:nAhead], lty = 2, 
+      col = "red")
 #
 # Model 2: using fixed values of variances. Do V and W matter?
 #
@@ -57,9 +75,9 @@ mod3 <- dlmModPoly ( order=1, dV=1, dW=10 )
 filt3 <- dlmFilter ( LakeHuron, mod3 )
 plot ( LakeHuron, type="p", xlab="Year", ylab="Depth",
        main="Lake Huron" )
-lines ( 1875:1972, filt1$m[-1], col="red" )
-lines ( 1875:1972, filt2$m[-1], col="blue" )
-lines ( 1875:1972, filt3$m[-1], col="green" )
+lines ( 1875:1972, filt1$m[-(n+1)], col="red" )
+lines ( 1875:1972, filt2$m[-(n+1)], col="blue" )
+lines ( 1875:1972, filt3$m[-(n+1)], col="green" )
 #
 # Model 3: Try using discount factors!
 #
@@ -152,19 +170,12 @@ dlmFilterDF <- function (y, mod, simplify = FALSE, DF)
 }
 mod3 <- dlmModPoly (order=1, dV=1)
 modFilt <- dlmFilterDF(LakeHuron, mod3, DF=0.9)
-plot.ts(LakeHuron)
+plot.ts(LakeHuron, ylab = "Depth")
 lines(modFilt$m,col="red")
 modFilt <- dlmFilterDF(LakeHuron, mod3, DF=0.8)
 lines(modFilt$m,col="blue")
 modFilt <- dlmFilterDF(LakeHuron, mod3, DF=0.95)
 lines(modFilt$m,col="green")
-#
-# Model 4: local linear regression model
-#
-mod4 <- dlmModPoly(dV = 1, dW = c(0, 0.5))
-modFilt <- dlmFilter(LakeHuron, mod4)
-plot.ts(LakeHuron)
-lines(modFilt$f,col="blue")
 #
 # Model 4: Try running the first order polynomial model with unknown variances using FFBS. This is slow!
 #
@@ -174,6 +185,7 @@ attach(gibbsout)
 #
 # Check convergence of running means
 #
+par(mfrow = c(1,2))
 ts.plot(ergMean(dV[-burn]),ylab=expression(bar(V)),xlab='iterations')
 ts.plot(ergMean(dW[-burn]),ylab=expression(bar(V)),xlab='iterations')
 #
@@ -188,8 +200,9 @@ hist(dV[-burn],probability=TRUE,nclass=20,xlab='V',ylab='f',main='')
 lines(density(dV[-burn]),lwd=3,col='red')
 hist(dW[-burn],probability=TRUE,nclass=20,xlab='W',ylab='f',main='')
 lines(density(dW[-burn]),lwd=3,col='red')
+par(mfrow = c(1,1))
 #
-# Model 5: Simple bootstrap filter model for out of sample prediction.
+# Model 4: Simple bootstrap filter model for out of sample prediction.
 #
 thetagen <- function(y,m0,C0,V,W,N){
   theta <- rnorm(N,m0,sqrt(C0))
@@ -237,3 +250,10 @@ ts.plot(LakeHuron,col='red',lwd=3)
 lines(c(1875:1972),ypred[,1],col='blue',lwd=3,lty=3)
 lines(c(1875:1972),ypred[,2],col='blue',lwd=3)
 lines(c(1875:1972),ypred[,3],col='blue',lwd=3,lty=3)
+#
+# Model 5: local linear regression model
+#
+mod5 <- dlmModPoly(dV = 0.5, dW = c(0.1, 0.2))
+modFilt <- dlmFilter(LakeHuron, mod4)
+plot.ts(LakeHuron)
+lines(modFilt$f,col="blue")
