@@ -1,0 +1,490 @@
+---
+title: "Assignment 2"
+author: "Lúa Arconada & Alejandro Macías"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r seed}
+# Set seed for reproducibility
+set.seed(1212)
+```
+
+```{r libraries, message=FALSE, warning=FALSE, results = 'hide'}
+# Load necessary libraries
+library(tidyverse)  # For data manipulation and visualization
+library(e1071)      # For support vector machines and other machine learning algorithms
+library(GGally)     # For pairwise plots and correlation visualization
+library(pander)     # For pretty printing of data frames
+library(graph)      # For graph algorithms and visualization
+library(gRain)      # For graphical models and Bayesian networks
+library(bnlearn)    # For learning Bayesian networks from data
+library(Rgraphviz)  # For plotting directed graphs
+```
+
+# Introduction
+
+The purpose of this assignment is to study Bayesian networks that might represent the information contained in a dataset, as well compare different methods to obtain them. For that, a network structure will be proposed through an educated guess, on which some out-of-sample predictions will be made. Next, different structures will be obtained through other approaches. Finally, all of the structures will be compared.
+
+For this task we are going to use a database obtained from the UCI Irvine Machine Learning Directory (<https://archive.ics.uci.edu/dataset/336/chronic+kidney+disease>). It consists of a dataset with $25$ variables and $400$ observations. It contains $11$ numeric variables and $14$ categorical ones (both binary and multicategorical) that can be used to predict chronic kidney disease.
+
+```{r dataload}
+# Define column names for the dataset
+names <- c('age', 'bp', 'sg', 'al', 'su', 'rbc', 'pc', 'pcc', 'ba', 'bgr', 'bu', 
+           'sc', 'sod', 'pot', 'hemo', 'pcv', 'wc', 'rc', 'htn', 'dm', 'cad', 
+           'appet', 'pe', 'ane', 'class')
+
+# Read the dataset from a CSV file into a data frame
+data <- read.table("chronic_kidney_disease.csv",   # File path
+                   sep=';',                        # Separator used in the CSV file
+                   na.strings='?',                # Define '?' as NA (missing) values
+                   header=FALSE,                  # The data file does not contain column names
+                   col.names=names)               # Use the defined column names
+
+# Display the first few rows of the dataset
+head(data)
+```
+
+Although the dataset contains both numerical and categorical variables, for the sake of simplicity, and in order to avoid the limitations that mixed models impose on the relationships between different variables (e.g a numerical variables cannot be a parent node for a categorical one), only categorical variables will be considered in this project. Furthermore, even some categorical variables will be dropped following a criterion explained in the following section.
+
+The selected variables indicate the following:
+
+-   `pcc` - pus cell clumps (present, not present)
+-   `ba` - bacteria (present, not present)
+-   `htn` - hypertension (yes, no)
+-   `dm` - diabetes mellitus (yes, no)
+-   `cad` - coronary artery disease (yes, no)
+-   `appet` - appetite (good, poor)
+-   `pe` - pedal edema (yes, no)
+-   `ane` - anemia (yes, no)
+-   `class` - class (chronic kidney disease, not chronic kidney disease)
+
+# Data Preprocessing
+
+After loading the dataset, we deal with the missing values for the sake of completeness.
+
+```{r sum1}
+# Display summary statistics for the dataset
+summary(data)
+```
+
+As explained earlier, only the categorical variables will be kept:
+
+```{r categorical}
+# Clean the 'dm' (diabetes mellitus) column by standardizing values
+data$dm <- ifelse(data$dm %in% c(' yes', ' yes'), 'yes', data$dm)
+
+# Define a vector of categorical column names
+categorical <- c("sg", "al", "su", "rbc", "pc", "pcc", "ba", "htn", "dm", "cad", 
+                 "appet", "pe", "ane", "class")
+
+# Subset the dataset to include only the categorical columns
+data <- data[categorical]
+
+# Convert all columns in the subset to factors (categorical variables)
+data[categorical] <- lapply(data[categorical], as.factor)
+
+# Display summary statistics for the cleaned and converted dataset
+summary(data)
+```
+
+We can take a look at the amount of missing values in each variable (in descending order):
+
+```{r sortna}
+# Calculate the number of missing values in each column using sapply() function
+missing_counts <- sapply(data, function(x) sum((is.na(x))))
+
+# Sort the missing value counts in descending order
+sort <- sort(missing_counts, decreasing = TRUE)
+
+# Display the sorted missing value counts
+sort
+```
+
+As was mentioned in the previous section, some variables will be dropped. The criterion for that is to drop those that are missing more than 10% of their values. This leaves the $9$ variables explained at the beginning. 
+
+```{r varelim}
+# Reassign the dataset 'data' excluding the columns with the five highest missing value counts
+data <- data[names(sort)[-seq(1, 5)]]
+
+# Display the first few rows of the modified dataset using pander package for pretty printing
+pander(head(data), row.names = FALSE)
+```
+
+```{r sum2}
+# Display summary statistics for the dataset
+summary(data)
+```
+
+Since we are dealing with categorical variables with very few missing values, it is sensible to use the mode to impute the missing values. For that, first we define the mode function:
+
+```{r mode}
+mode = function(x) {
+  # Remove NA values for the mode calculation
+  ux = unique(x[!is.na(x)])
+  
+  # Tabulate occurrences of each unique value and find the one with the maximum count
+  ux[which.max(tabulate(match(x, ux)))]
+}
+```
+
+After, we impute the missing values:
+
+```{r computena}
+# Define a vector of categorical variable names
+categorical = c("pcc", "ba", "htn", "dm", "cad", "appet", "pe", "ane", "class")
+
+# For each categorical variable in the dataset, replace missing values with the mode
+data[categorical] = lapply(data[categorical], function(x) replace_na(x, mode(x)))
+```
+
+```{r sum3}
+# Display summary statistics for the dataset
+summary(data)
+```
+
+Finally, we check that there are no missing values left:
+
+```{r check nas left, cache = TRUE}
+# Function to check for missing values
+check_missing_values <- function(data) {
+  if (any(is.na(data))) {          # Check if any missing values exist
+    message("There are missing values left.")  # Print a message if missing values are found
+  } else {
+    message("There are no missing values left.")  # Print a message if no missing values are found
+  }
+}
+
+# Call the function with our dataset
+check_missing_values(data)  # Check missing values in data dataset
+```
+
+# Proposed network structure
+
+In order to propose a network structure, the relationship between the different symptoms and diseases will be taken into account. For example, the presence of pus cell clumps is a clear symptom of a bacterial infection, which, at the same time, if grave enough might cause chronic kidney disease. On a different note, pedal enema (swollen legs and feet) might be a sign of hypertension, as well as of chronic kidney disease, since in both cases the body might not be able to get rid of unnecessary fluids.
+
+There is also the case of diabetes to consider, since this chronic disease can lead to multiple complications. Diabetes can lead to changes in appetite, which at the same time might lead to anemia, which in the long run can have consequences as serious as coronary artery diseases. At the same time, diabetes can lead to coronary artery disease, just like hypertension. Finally, both diabetes and coronary artery disease can lead to chronic kidney disease, due to the close relationship between cardiovascular, digestive and urinary systems.
+
+All of this can be translated into an R model through the following code:
+
+```{r ourmodel}
+# Define the Bayesian network structure using a string representation
+dag = model2network("[pcc][ba|pcc][pe][htn|pe][dm][appet|dm][ane|appet][cad|htn:ane:dm][class|cad:ba:pe:dm:htn:pcc]")
+```
+
+This model can also be visualized:
+
+```{r plotourmodel}
+# Plot the Bayesian network
+plot(dag)
+```
+
+This is our directed acyclic graph (DAG), which represents the dependencies among the variables. Each node in the DAG corresponds to a variable, and each directed edge indicates a conditional dependency between variables. The DAG structure defines the parent-child relationships among the variables, determining which variables influence others. We introduced the following dependencias via conditional probabilities:
+
+- `ba` depends on `pcc`: whether there are bacteria present or not might depend on whether there is a presence of pus cell clumps.
+- `htn` depends on `pe`: the diagnosis of hypertension might depend on whether there is pedal enema.
+- `appet` depends on `dm`: the evaluation of appetite might depend on whether diabetes mellitus was diagnosed.
+- `ane` depends on `appet`: the diagnosis of anemia might depend on the evaluation of appetite.
+- `cad` depends on `htn`, `ane` and `dm`: the diagnosis of coronary artery disease might depend on the diagnosis of hypertension, anemia, and diabetes mellitus.
+- `class` depends on `cad`, `ba`, `pe`, `dm`, `htn` and `pcc`: the final diagnosis (chronic kidney disease or not) might depend on the diagnosis of coronary artery disease, the presence of bacteria, the diagnosis of pedal enema, diabetes mellitus and hypertension and the presence of pus cell clumps.
+
+# Model fitting and prediction
+
+## Bayesian approach
+
+Since this network is comprised of $9$ different variables, it is guaranteed that some combination of them will not be found among the $400$ observations of the dataset, which means that the Maximum Likelihood approach should not be used to fit the model. Since there is no expert knowledge available to us regarding the different probabilities for the variables of this dataset, only the Bayesian approach, which makes use of Laplacian smoothing, is left to fit the model.
+
+We are going to be performing Bayesian parameter estimation to fit a Bayesian network model to our data. This process aims to estimate the conditional probability distributions (CPDs) of the nodes in the Bayesian network given their parents in the directed acyclic graph, based on the observed data (prior distributions).
+
+We provide the observed data, which is used to estimate the CPDs for the nodes in the DAG. The Bayesian method starts with prior distributions over the parameters, representing any prior knowledge or assumptions about the parameter values before observing the data. The likelihood is derived from the observed data and measures how well the model parameters explain the observed data. Bayesian estimation then combines the prior distributions with the likelihood to produce posterior distributions, which represent the updated beliefs about the parameters after observing the data.
+
+The Bayesian estimation method has several advantages. It allows the incorporation of prior knowledge or assumptions through prior distributions, which can be particularly useful when the available data is sparse or limited. The priors help stabilize the estimates. Additionally, Bayesian estimation provides a probabilistic measure of uncertainty in the estimates, resulting in a posterior distribution over the parameters.
+
+```{r fitting}
+# Fit Bayesian network using the specified structure 'dag' to the data
+bayesfit <- bn.fit(dag, data, method = "bayes")
+
+# Display the fitted Bayesian network model
+bayesfit
+```
+
+In this output we can observe the details of the parameters of our fitted Bayesian network model, with each node in the network being described along with its parameters. These parameters are presented as conditional probability tables (CPTs), which define the probability distribution of each node given its parents in the directed acyclic graph (DAG); and each node is modeled using a multinomial distribution, which is suitable for categorical variables. The CPTs show the probabilities of the node taking on each possible value, conditioned on the values of its parent nodes.
+
+For instance, consider the node `ane`, which is conditioned on the variable `appet`. The CPT shows the probabilities of `ane` being `no` or `yes` given that `appet` is `good` or `poor`. Similarly, the node `appet` is conditioned on the variable `dm`, and its CPT lists the probabilities of `appet` being `good` or `poor` based on whether `dm` is `no` or `yes`.
+
+More complex conditional structures are observed in nodes like `cad` and `class`, which depend on multiple parent variables. For example, the node `cad` has a CPT that varies based on the values of both `dm` and `htn`. The output shows multiple tables corresponding to different combinations of the parent variables' values. On the other hand, some nodes, such as `dm` and `pcc`, do not have parent variables, making their CPTs simple distributions over their possible values.
+
+This output helps interpret the relationships and dependencies between variables as captured by the Bayesian network. Each CPT provides insights into how the probability of a node's value changes based on the values of its parent nodes. These fitted parameters are essential for probabilistic inference tasks, such as computing the likelihood of observed data, predicting the values of certain variables given others, and conducting probabilistic queries.
+
+## Out-of-sample prediction
+
+We can try to make predictions using different methods. For the sake of the example, we will attempt to predict the probability of a patient having coronary artery disease knowing that they are not hypertense, they are anemic, and they suffer from diabetes mellitus.
+
+We will start with the exact prediction through the standard method (moralizing and triangulating the graph, to later make use of its cliques). We first need to convert our bayesian network into a `grain` object because they are specifically designed for probabilistic reasoning and graphical models, which facilitate the efficient computation of marginal and conditional probabilities.
+
+We also compile the `grain` object to prepare the network for efficient inference by creating an internal data structure, typically a junction tree, which optimizes the process of propagating probabilities and updating the network based on new information. We then carry out propagation of probabilities, ensuring that all probability tables within the network are consistent and accurately reflect the relationships and dependencies between variables. This step updates the entire network to prepare it for the introduction of evidence.
+
+Following propagation, specific evidence is introduced into the network. This involves setting observed states for hypertension, anemia, and diabetes mellitus. The network is updated to reflect these observed states, altering the probability distributions of other variables based on these new conditions.
+
+Finally, the network is queried to determine the marginal probability of the likelihood of coronary artery disease, given the set evidence. This step involves calculating the probability distribution of the specified outcome based on the updated network, providing insights into the effects of the observed states on the probability of the outcome of interest. This entire process allows for robust probabilistic reasoning and inference within the Bayesian network framework.
+
+```{r pred1}
+# Convert the fitted Bayesian network to a grain object
+bayesfit_gr <- as.grain(bayesfit)
+
+# Compile the Bayesian network
+bayesfit_gr <- compile(bayesfit_gr)
+
+# Perform belief propagation on the Bayesian network
+bayesfit_gr <- propagate(bayesfit_gr)
+
+# Set evidence for specific nodes in the Bayesian network
+bayesfit_gr_ev <- setFinding(bayesfit_gr, nodes = c("htn", "ane", "dm"), states = c("no", "yes", "yes"))
+
+# Query the Bayesian network for marginal probabilities of the node "cad" given the evidence
+querygrain(bayesfit_gr_ev, nodes = "cad", type = "marginal")
+```
+
+This output indicates the marginal probability distribution of the variable `cad` given the evidence provided earlier (not hypertense, anemic and diabetes mellitus present). It shows that the probability of not having coronary artery disease is approximately $0.98$, while the probability of suffering it is approximately $0.02$.
+
+These probabilities represent the model's assessment of the likelihood of coronary artery disease in the context of the observed states of hypertension, anemia, and diabetes mellitus. In this case, the evidence provided suggests a very low probability of coronary artery disease, with the vast majority of the probability mass assigned to the outcome of "no" for "cad".
+
+Next, we attempt to use an approximate method called conditional probability querying. This approach allows us to estimate the conditional probability of having coronary artery disease given the already mentioned conditions.
+
+This works by running Monte Carlo sampling to estimate this conditional probability. It simulates a large number of samples ($n = 1e5$ in this case) from the Bayesian network, ensuring that the samples are consistent with the provided evidence. Then, it calculates the proportion of these samples where patients do have coronary artery disease.
+
+By sampling from the Bayesian network conditioned on the given evidence, the function provides an estimate of the conditional probability of interest. This method is particularly useful when exact inference is computationally expensive or intractable, allowing for efficient probabilistic reasoning in complex networks.
+
+```{r pred2}
+# Perform a conditional probability query on the fitted Bayesian network 'bayesfit'
+# Query: P(cad=="yes" | htn=="no" & ane=="yes" & dm=="yes")
+# n=1e5 specifies the number of samples for Monte Carlo estimation
+query <- cpquery(bayesfit, (cad == "yes"), (htn == "no" & ane == "yes" & dm == "yes"), n = 1e5)
+
+# Display the result of the conditional probability query
+query
+```
+
+Interpreted in context, this result suggests that under the specified conditions involving hypertension, anemia and diabetes mellitus, there is an estimated probability of `r query` that an individual would have coronary artery disease. This estimate provides valuable insights into the likelihood of coronary artery disease in individuals with the specified health conditions, facilitating informed decision-making in healthcare or related fields.
+
+Finally, we can also use likelihood weighting as the method used as the sampling method to estimate the conditional probability. Likelihood weighting is a technique commonly used in Bayesian networks for sampling from the posterior distribution given evidence. It assigns weights to samples based on the likelihood of the evidence given the sample, allowing for more efficient sampling in cases where the evidence has a significant impact on the distribution of the variables.
+
+Similar to the previous example, Monte Carlo sampling with the same specified number of samples is performed. The algorithm generates samples consistent with the provided evidence and calculates the proportion of these samples where coronary artery disease being `yes` occurs.
+
+The output of this query would provide an estimate of the conditional probability of coronary artery disease given the specified evidence, accounting for the likelihood of the evidence under consideration.
+
+```{r pred3}
+# Perform a conditional probability query on the fitted Bayesian network 'bayesfit'
+# Query: P(cad=="yes" | htn=="no", ane=="yes", dm=="yes")
+# The evidence is provided as a list: htn="no", ane="yes", dm="yes"
+# Method "lw" specifies likelihood weighting as the inference method
+# n=1e5 specifies the number of samples for Monte Carlo estimation
+query2 <- cpquery(bayesfit, (cad == "yes"), evidence = list(htn = "no", ane = "yes", dm = "yes"), method = "lw", n = 1e5)
+
+# Display the result of the conditional probability query
+query2
+```
+
+This result suggests that under the specified conditions, there is an estimated probability of `r query2` that an individual would have coronary artery disease.
+
+As we can see, all method predict very similar probabilities for a person with said characteristics to suffer from coronary artery disease.
+
+# Algorithms for structure learning
+
+In this section, the previous proposed structure of the network will be forgotten, since different approaches will be used to learn the conditional independence structure through causal inference. These algorithms make use of the Markov blanket of the nodes of the network.
+
+First, the Incremental Association Markov Blanket Algorithm will be used. This algorithm iteratively learns the Markov blanket structure from the given data, which comprises the set of variables that are conditionally independent of the target variable given all other variables. Essentially, it identifies the most relevant variables associated with each target variable based on conditional independence tests.
+
+We obtain the learned dependencies and relationships between variables in the dataset, which provide insights into the conditional relationships between variables, including their direct and indirect influences on one another within the Bayesian network framework.
+
+```{r iamb}
+# Learn the structure of a Bayesian network using the PC-IAMB algorithm on the provided data
+mb_dag <- iamb(data)
+
+# Display the learned structure of the Bayesian network
+mb_dag
+
+# Plot the learned structure of the Bayesian network
+plot(mb_dag)
+```
+
+We also plotted the resulting model because it serves as a graphical visualization of the learned Markov blanket network. By visualizing the network structure, we can gain a deeper understanding of the interconnections between variables and identify key variables that influence others. This visualization aids in exploring the dependencies within the dataset and provides valuable insights into the underlying relationships between variables, facilitating data analysis and interpretation.
+
+We introduce whitelists to enforce dependencies. In this case, we specify that `htn` directly influences `class`, as well as `pcc` influences `class` too. This dependency was not present in our previous model; instead, it was in the opposite direction. We use the same algorithm for the model, but making it have this specified influence. WE included these dependencies because, as we said when creating our first model, hypertension and pus cells are usually indicators of suffering coronary artery disease.
+
+```{r iamb_wl}
+# Define a whitelist specifying allowable edges between nodes
+wl <- data.frame(from = c("htn", "pcc"), to = c("class", "class"))
+
+# Learn the structure of a Bayesian network using the PC-IAMB algorithm on the provided data,
+# with the specified whitelist
+mb_dag_wl <- iamb(data, whitelist = wl)
+
+# Display the learned structure of the Bayesian network with the whitelist
+mb_dag_wl
+
+# Plot the learned structure of the Bayesian network with the whitelist
+plot(mb_dag_wl)
+```
+
+We, once again, use this kind of model, but we add blacklists to ban dependencies following our criterion. We make it so `appet` can not influence `pe` and `pe` can not influence `appet`. We have banned dependencies between appetite and pedal edema, since medically speaking they are not usually related.
+
+```{r iamd_bl}
+# Define a blacklist specifying disallowed edges between nodes
+bl <- data.frame(from = c("appet", "pe"), to = c("pe", "appet"))
+
+# Learn the structure of a Bayesian network using the PC-IAMB algorithm on the provided data,
+# with the specified blacklist
+mb_dag_bl <- iamb(data, blacklist = bl)
+
+# Display the learned structure of the Bayesian network with the blacklist
+mb_dag_bl
+
+# Plot the learned structure of the Bayesian network with the blacklist
+plot(mb_dag_bl)
+```
+
+Moreover, we create the same kind of model, but now taking both into account, whitelists and blacklists (mandatory dependencies and prohibited ones).
+
+```{r iamb_blwl}
+# Learn the structure of a Bayesian network using the PC-IAMB algorithm on the provided data,
+# with both a blacklist and a whitelist specified
+mb_dag_blwl <- iamb(data, blacklist = bl, whitelist = wl)
+
+# Display the learned structure of the Bayesian network with both blacklist and whitelist applied
+mb_dag_blwl
+
+# Plot the learned structure of the Bayesian network with both blacklist and whitelist applied
+plot(mb_dag_blwl)
+```
+
+Next, we use a hill-climbing greedy search algorithm. This is a heuristic search algorithm used to find the optimal structure of a Bayesian network. It starts with an initial network structure and iteratively explores neighboring structures, modifying them to improve a given scoring metric (e.g., Bayesian Information Criterion, Akaike Information Criterion). We apply it including the previously defined whitelists and blacklists.
+
+```{r score__dag}
+# Learn the structure of a Bayesian network using the Hill-Climbing algorithm on the provided data,
+# with both a blacklist and a whitelist specified
+score_dag <- hc(data, blacklist = bl, whitelist = wl)
+
+# Display the learned structure of the Bayesian network with both blacklist and whitelist applied
+score_dag
+
+# Plot the learned structure of the Bayesian network with both blacklist and whitelist applied
+plot(score_dag)
+```
+
+Moreover, a hybrid approach can also be applied, which combines the previous two methods. More specifically, the method used here is knwon as Max-Min Hill Climbing, which is specifically designed for learning the structure of Bayesian networks. It iteratively explores neighboring network structures, adding or removing edges to improve a scoring metric, such as the Bayesian Information Criterion (BIC) or the Minimum Description Length (MDL) score.
+
+We also implement blacklists and whitelists, so we are guiding the search process to respect domain knowledge or prior assumptions about variable relationships. This helps to ensure that the learned network structure aligns with our expectations.
+
+```{r hybrid_dag}
+# Learn the structure of a Bayesian network using the Max-Min Hill-Climbing algorithm on the provided data,
+# with both a blacklist and a whitelist specified
+hybrid_dag <- mmhc(data, blacklist = bl, whitelist = wl)
+
+# Display the learned structure of the Bayesian network with both blacklist and whitelist applied
+hybrid_dag
+
+# Plot the learned structure of the Bayesian network with both blacklist and whitelist applied
+plot(hybrid_dag)
+```
+
+Furthermore, we apply the Tabu algorithm with blacklists and whitelists too. It is a metaheuristic optimization algorithm often used for combinatorial optimization problems, including optimization problems related to Bayesian network structure learning. It is an iterative algorithm that explores neighboring solutions to improve upon the current solution. The "tabu" part refers to keeping track of recent moves to avoid revisiting them, preventing the algorithm from getting stuck in local optimals.
+
+```{r tabu_dag}
+# Run the tabu search algorithm to learn a Bayesian network structure from data,
+# with specified blacklist and whitelist.
+tabu_dag <- tabu(data, blacklist = bl, whitelist = wl)
+
+# Print the learned Bayesian network structure
+tabu_dag
+
+# Plot the learned Bayesian network structure
+plot(tabu_dag)
+```
+
+Finally, the Grow-Shrink algorithm is implemented with whitelists and blacklists too. It is an algorithmic approach that incrementally builds a solution by making locally optimal choices. In the context of Bayesian network structure learning, it typically involves iteratively adding or removing edges from an initial network structure to optimize a scoring metric, such as the Bayesian Information Criterion (BIC) or the Minimum Description Length (MDL) score.
+
+```{r grow_dag}
+# Run the Grow-Shrink algorithm to learn a Bayesian network structure from data,
+# with specified blacklist and whitelist.
+grow_dag <- gs(data, blacklist = bl, whitelist = wl)
+
+# Print the learned Bayesian network structure
+grow_dag
+
+# Plot the learned Bayesian network structure
+plot(grow_dag)
+```
+
+# Comparison of graphical structures
+
+We compute and display the BIC and AIC values of each model to be able to compare them using these measures. Before doing that, we have to be careful and transform our models that are partially directed acyclic graphs to fully directed acyclic graphs to be able to use the `score` function from the `bnlearn` library.
+
+```{r bicaicvalues}
+# List to store AIC and BIC values
+bic_aic_values <- list()
+
+# Define the ordering of nodes
+# Replace 'node1', 'node2', ..., 'nodeN' with the actual names of the nodes in your dataset
+node_order <- names(data)  # or a specific ordering if you have one
+
+# List of your Bayesian network models
+models_pdag <- list(mb_dag, mb_dag_wl, mb_dag_bl, mb_dag_blwl, score_dag, hybrid_dag, tabu_dag, grow_dag)
+
+# Convert the partially directed acyclic graphs (PDAG) to fully directed acyclic graphs (DAG)
+models <- lapply(models_pdag, function(model) pdag2dag(model, ordering = node_order))
+
+# Calculate BIC for each model
+for (i in seq_along(models)) {
+  model <- models[[i]]  # Get the current model
+  bic <- score(model, data)  # Calculate BIC
+  aic <- score(model, data, type = "aic")  # Calculate AIC
+  bic_aic_values[[i]] <- c(BIC = bic, AIC = aic)  # Store AIC and BIC values
+}
+
+# Combine AIC and BIC values into a data frame
+bic_aic_df <- do.call(rbind, bic_aic_values)
+
+# Add model names as row names
+rownames(bic_aic_df) <- c("mb_dag", "mb_dag_wl", "mb_dag_bl", "mb_dag_blwl", "score_dag", "hybrid_dag", "tabu_dag", "grow_dag")
+
+# Convert to dataframe
+bic_aic_df <- as.data.frame(bic_aic_df)
+
+# Print the BIC, extended BIC and AIC values
+bic_aic_df
+```
+
+```{r bestmodel}
+# Find the model with the lowest BIC
+best_bic_model <- bic_aic_df[which.min(bic_aic_df$BIC), ]
+best_bic_model
+
+# Find the model with the lowest AIC
+best_aic_model <- bic_aic_df[which.min(bic_aic_df$AIC), ]
+best_aic_model
+```
+
+We can see that according to both criteria, Bayesian Information Criterion and Akaike Information Criterion, the best bayesian model for our data is the `mb_dag_blwl`. This model was obtained using the Incremental Association Markov Blanket algorithm with whitelists and blacklists in our data.
+
+```{r plotbestmodel}
+# Plot the Bayesian network structure represented by mb_dag_blwl
+plot(mb_dag_blwl)
+```
+
+# Conclusions (summary of the results)
+
+This assignment delved into the realm of Bayesian networks, aiming to understand the data structure of a dataset related to chronic kidney disease and explore various methods to infer causal relationships among its variables. We began by proposing an initial network structure based on domain knowledge and medical insights. Subsequently, we employed different algorithms to learn Bayesian network structures from the dataset and compared their performance.
+
+Through data preprocessing, we cleaned the dataset, handled missing values, and focused on categorical variables relevant to the study. We then proposed an initial network structure based on known relationships between symptoms and diseases associated with chronic kidney disease. This initial structure served as a reference point for subsequent analysis.
+
+We utilized Bayesian parameter estimation to fit a Bayesian network model to the data, leveraging Laplacian smoothing to handle sparse data and estimate conditional probability distributions. Out-of-sample predictions were made using exact inference, conditional probability querying, and likelihood weighting, providing estimates of the probability of coronary artery disease given specific health conditions.
+
+Moving on to structure learning algorithms, we explored various approaches including Incremental Association Markov Blanket, Hill-Climbing, Max-Min Hill Climbing, Tabu Search, and Grow-Shrink. These algorithms inferred network structures by identifying conditional dependencies among variables, guided by user-defined constraints such as whitelists and blacklists.
+
+Comparing the learned network structures, we computed Bayesian Information Criterion (BIC) and Akaike Information Criterion (AIC) values to evaluate model performance. The model obtained using Incremental Association Markov Blanket algorithm with whitelists and blacklists exhibited the lowest BIC and AIC values, indicating its superior fit to the data.
+
+In conclusion, this assignment demonstrated the importance of Bayesian networks in modeling complex systems and extracting meaningful insights from data. By leveraging domain knowledge and employing advanced algorithms, we gained valuable insights into the causal relationships among variables related to chronic kidney disease, facilitating better understanding and decision-making in healthcare settings. Further exploration could involve refining the network structure, incorporating additional data sources, and validating the models through real-world experiments or expert evaluations. Overall, Bayesian networks offer a powerful framework for probabilistic reasoning and causal inference, with broad applications in diverse domains.
